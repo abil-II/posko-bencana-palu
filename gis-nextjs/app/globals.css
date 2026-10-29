@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+/* Pastikan Leaflet mengisi penuh kontainer */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Override Leaflet popup agar lebih rapi */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+}
+
+.leaflet-popup-content {
+  margin: 8px 12px !important;
+}
