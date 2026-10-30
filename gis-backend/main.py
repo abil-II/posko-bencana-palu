@@ -48,18 +48,16 @@ CRS_UTM = "EPSG:32750"  # UTM Zona 50S — perhitungan metrik
 # Koordinat dalam WGS84 (lon, lat).
 # ──────────────────────────────────────────────────────────
 POSKO_DATA = [
-    {"id": "P01", "nama": "Posko Induk Brimob Polda Sulteng",        "lon": 119.8682, "lat": -0.8869},
-    {"id": "P02", "nama": "Posko GOR Manakarra (Lapangan Vatulemo)", "lon": 119.8491, "lat": -0.8894},
-    {"id": "P03", "nama": "Posko Dinas Sosial Kota Palu",            "lon": 119.8703, "lat": -0.9012},
-    {"id": "P04", "nama": "Posko BPBD Kota Palu",                    "lon": 119.8622, "lat": -0.8798},
-    {"id": "P05", "nama": "Posko Stadion Gawalise",                  "lon": 119.8244, "lat": -0.8663},
-    {"id": "P06", "nama": "Posko Lapangan Maranatha Palu Barat",     "lon": 119.8419, "lat": -0.8831},
-    {"id": "P07", "nama": "Posko RSUD Undata Palu",                  "lon": 119.8894, "lat": -0.9177},
-    {"id": "P08", "nama": "Posko Universitas Tadulako",              "lon": 119.8213, "lat": -0.9001},
-    {"id": "P09", "nama": "Posko Kelurahan Balaroa",                 "lon": 119.8354, "lat": -0.8571},
-    {"id": "P10", "nama": "Posko Kelurahan Petobo",                  "lon": 119.9012, "lat": -0.9312},
-    {"id": "P11", "nama": "Posko Pantai Talise",                     "lon": 119.8781, "lat": -0.8713},
-    {"id": "P12", "nama": "Posko Kelurahan Mamboro",                 "lon": 119.8543, "lat": -0.8156},
+    {"id": "P01", "nama": "Posko Mako Brimob Polda Sulteng",      "lon": 119.893064, "lat": -0.855826},
+    {"id": "P02", "nama": "Posko Lapangan Vatulemo (Wali Kota)", "lon": 119.877881, "lat": -0.893121},
+    {"id": "P03", "nama": "Posko Dinas Sosial Kota Palu",        "lon": 119.873215, "lat": -0.899120},
+    {"id": "P04", "nama": "Posko Kantor BPBD Kota Palu",         "lon": 119.876100, "lat": -0.885400},
+    {"id": "P05", "nama": "Posko Stadion Gawalise (Palu Barat)",  "lon": 119.838500, "lat": -0.891200},
+    {"id": "P06", "nama": "Posko RSUD Undata Palu",              "lon": 119.886200, "lat": -0.852100},
+    {"id": "P07", "nama": "Posko Universitas Tadulako (Untad)",  "lon": 119.896500, "lat": -0.838100},
+    {"id": "P08", "nama": "Posko Kelurahan Balaroa",             "lon": 119.843200, "lat": -0.898500},
+    {"id": "P09", "nama": "Posko Kelurahan Petobo",              "lon": 119.902100, "lat": -0.928400},
+    {"id": "P10", "nama": "Posko Lapangan Anoa Tatura",          "lon": 119.881200, "lat": -0.911500},
 ]
 
 # ──────────────────────────────────────────────────────────
@@ -142,8 +140,10 @@ class LocationRequest(BaseModel):
 # ──────────────────────────────────────────────────────────
 # Helper
 # ──────────────────────────────────────────────────────────
-def _heuristic_astar(u: int, v: int, G: nx.MultiDiGraph) -> float:
-    """Heuristik jarak Euclidean untuk A* (bekerja pada graph yang diproyeksikan)."""
+"""Heuristik jarak Euclidean untuk A* (bekerja pada graph yang diproyeksikan)."""
+def _heuristic_astar(u: int, v: int) -> float:
+    """Heuristik jarak Euclidean untuk A*."""
+    G: nx.MultiDiGraph = state["G"]
     xu, yu = G.nodes[u]["x"], G.nodes[u]["y"]
     xv, yv = G.nodes[v]["x"], G.nodes[v]["y"]
     return math.hypot(xu - xv, yu - yv)
