@@ -1,4 +1,4 @@
-@echo off
+    @echo off
 REM ── Setup & Jalankan Backend GIS Palu ──────────────────────────────────────
 echo.
 echo  =====================================================

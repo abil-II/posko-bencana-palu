@@ -1,0 +1,15 @@
+# Python Backend
+gis-backend/venv/
+gis-backend/__pycache__/
+gis-backend/cache/
+*.pyc
+
+# Next.js Frontend
+gis-nextjs/node_modules/
+gis-nextjs/.next/
+gis-nextjs/out/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
