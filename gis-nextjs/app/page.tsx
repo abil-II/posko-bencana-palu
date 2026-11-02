@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { LayerVisibility } from './components/MapView';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface PoskoInfo {
@@ -66,22 +65,10 @@ export default function HomePage() {
   const [allPosko, setAllPosko] = useState<GeoJSON.FeatureCollection | null>(null);
   const [boundaryGeoJSON, setBoundaryGeoJSON] =
     useState<GeoJSON.FeatureCollection | null>(null);
-  const [roadsGeoJSON, setRoadsGeoJSON] =
-    useState<GeoJSON.FeatureCollection | null>(null);
 
   // Kontrol UI
   const [activeTab, setActiveTab] = useState<'analysis' | 'posko_list'>('analysis');
   const [searchQuery, setSearchQuery] = useState('');
-  const [basemapMode, setBasemapMode] = useState<'osm_standard' | 'vector_only'>(
-    'osm_standard',
-  );
-  const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
-    boundary: true,
-    roads: false,
-    posko: true,
-    buffer: true,
-    route: true,
-  });
   const [selectedPoskoCoords, setSelectedPoskoCoords] = useState<
     [number, number] | null
   >(null);
@@ -95,16 +82,14 @@ export default function HomePage() {
     let cancelled = false;
     async function loadInitialLayers() {
       try {
-        const [poskoRes, boundRes, roadsRes] = await Promise.all([
+        const [poskoRes, boundRes] = await Promise.all([
           fetch(`${BACKEND_URL}/posko`),
           fetch(`${BACKEND_URL}/boundary`),
-          fetch(`${BACKEND_URL}/roads`),
         ]);
 
         if (!cancelled) {
           if (poskoRes.ok) setAllPosko(await poskoRes.json());
           if (boundRes.ok) setBoundaryGeoJSON(await boundRes.json());
-          if (roadsRes.ok) setRoadsGeoJSON(await roadsRes.json());
         }
       } catch {
         // Biarkan UI tetap tampil
@@ -166,18 +151,6 @@ export default function HomePage() {
     setActivePoskoId(null);
   };
 
-  const handleSwitchBasemap = (mode: 'osm_standard' | 'vector_only') => {
-    setBasemapMode(mode);
-    setLayerVisibility((prev) => ({
-      ...prev,
-      roads: mode === 'vector_only',
-    }));
-  };
-
-  const toggleLayer = (key: keyof LayerVisibility) => {
-    setLayerVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
   // Filter daftar posko
   const filteredPoskoList = useMemo(() => {
     const features = allPosko?.features ?? [];
@@ -229,33 +202,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* ── Pilihan Mode Peta ── */}
-        <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
-            <button
-              type="button"
-              onClick={() => handleSwitchBasemap('osm_standard')}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                basemapMode === 'osm_standard'
-                  ? 'bg-blue-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Peta Detail
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSwitchBasemap('vector_only')}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                basemapMode === 'vector_only'
-                  ? 'bg-blue-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Peta Sederhana
-            </button>
-          </div>
-        </div>
       </header>
 
       {/* ── Konten Utama ── */}
@@ -684,63 +630,9 @@ export default function HomePage() {
             routeGeoJSON={routeData?.geojson ?? null}
             allPoskoGeoJSON={allPosko}
             boundaryGeoJSON={boundaryGeoJSON}
-            roadsGeoJSON={roadsGeoJSON}
-            layerVisibility={layerVisibility}
-            basemapMode={basemapMode}
             selectedPoskoCoords={selectedPoskoCoords}
             activePoskoId={activePoskoId}
           />
-
-          {/* ── Panel Kontrol Tampilan Peta (Ramah Pengguna Umum) ── */}
-          <div className="absolute top-3.5 right-3.5 z-[1000] bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl shadow-md p-3.5 w-60">
-            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-800">
-                Tampilan Peta
-              </span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={layerVisibility.posko}
-                  onChange={() => toggleLayer('posko')}
-                  className="rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-                />
-                Titik Posko Bencana
-              </label>
-
-              <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={layerVisibility.route}
-                  onChange={() => toggleLayer('route')}
-                  className="rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-                />
-                Jalur Rute Tercepat
-              </label>
-
-              <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={layerVisibility.buffer}
-                  onChange={() => toggleLayer('buffer')}
-                  className="rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-                />
-                Area Jangkauan (2, 5, 10, 15 km)
-              </label>
-
-              <label className="flex items-center gap-2 text-slate-700 font-medium cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={layerVisibility.boundary}
-                  onChange={() => toggleLayer('boundary')}
-                  className="rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-                />
-                Batas Wilayah Kota Palu
-              </label>
-            </div>
-          </div>
         </main>
       </div>
 

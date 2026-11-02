@@ -57,23 +57,12 @@ const PALU_BOUNDS: L.LatLngBoundsExpression = [
 ];
 
 // ── Types ────────────────────────────────────────────────────────────────────
-export interface LayerVisibility {
-  boundary: boolean;
-  roads: boolean;
-  posko: boolean;
-  buffer: boolean;
-  route: boolean;
-}
-
 interface MapViewProps {
   onMapClick: (lat: number, lon: number) => void;
   userLatLng: [number, number] | null;
   routeGeoJSON: GeoJSON.FeatureCollection | null;
   allPoskoGeoJSON: GeoJSON.FeatureCollection | null;
   boundaryGeoJSON: GeoJSON.FeatureCollection | null;
-  roadsGeoJSON: GeoJSON.FeatureCollection | null;
-  layerVisibility: LayerVisibility;
-  basemapMode: 'osm_standard' | 'vector_only';
   selectedPoskoCoords: [number, number] | null;
   activePoskoId: string | null;
 }
@@ -100,21 +89,6 @@ function FlyToController({ target }: { target: [number, number] | null }) {
 }
 
 // ── Style Layer Peta (Palet Putih & Biru) ────────────────────────────────────
-function roadNetworkStyle(feature?: GeoJSON.Feature): L.PathOptions {
-  const highway = String(feature?.properties?.highway ?? 'residential');
-  const isMajor =
-    highway.includes('trunk') ||
-    highway.includes('primary') ||
-    highway.includes('secondary');
-  const isTertiary = highway.includes('tertiary');
-
-  return {
-    color: isMajor ? '#475569' : isTertiary ? '#64748B' : '#94A3B8',
-    weight: isMajor ? 2.0 : isTertiary ? 1.3 : 0.9,
-    opacity: isMajor ? 0.85 : 0.65,
-  };
-}
-
 function bufferStyle(): L.PathOptions {
   return {
     color: '#2563EB',
@@ -162,9 +136,6 @@ export default function MapView({
   routeGeoJSON,
   allPoskoGeoJSON,
   boundaryGeoJSON,
-  roadsGeoJSON,
-  layerVisibility,
-  basemapMode,
   selectedPoskoCoords,
   activePoskoId,
 }: MapViewProps) {
@@ -216,16 +187,12 @@ export default function MapView({
     weight: 2.5,
     opacity: 0.85,
     fillColor: '#FFFFFF',
-    fillOpacity: basemapMode === 'vector_only' ? 0.92 : 0.0,
+    fillOpacity: 0.0,
     dashArray: '8 5',
   };
 
   return (
-    <div
-      className={`w-full h-full relative ${
-        basemapMode === 'vector_only' ? 'vector-canvas-mode' : ''
-      }`}
-    >
+    <div className="w-full h-full relative">
       <MapContainer
         center={PALU_CENTER}
         zoom={14}
@@ -237,41 +204,29 @@ export default function MapView({
         className="w-full h-full"
         zoomControl={false}
       >
-        {/* ── Peta Dasar OpenStreetMap ── */}
-        {basemapMode === 'osm_standard' && (
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            maxZoom={19}
-          />
-        )}
+        {/* ── Peta Dasar OpenStreetMap (Peta Detail) ── */}
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          maxZoom={19}
+        />
 
         <ZoomControl position="bottomright" />
         <ClickHandler onMapClick={onMapClick} />
         <FlyToController target={selectedPoskoCoords} />
 
         {/* ── Batas Wilayah Kota Palu ── */}
-        {layerVisibility.boundary && boundaryGeoJSON && (
+        {boundaryGeoJSON && (
           <GeoJSON
-            key={`palu-boundary-${basemapMode}`}
+            key="palu-boundary"
             data={boundaryGeoJSON}
             style={() => boundaryPathOptions}
             interactive={false}
           />
         )}
 
-        {/* ── Jaringan Jalan ── */}
-        {layerVisibility.roads && roadsGeoJSON && (
-          <GeoJSON
-            key="palu-roads"
-            data={roadsGeoJSON}
-            style={roadNetworkStyle}
-            interactive={false}
-          />
-        )}
-
         {/* ── Area Radius Pencarian ── */}
-        {layerVisibility.buffer && bufferFeatures.length > 0 && (
+        {bufferFeatures.length > 0 && (
           <GeoJSON
             key={`buffer-${geoJsonKey}`}
             data={
@@ -294,7 +249,7 @@ export default function MapView({
         )}
 
         {/* ── Garis Rute Tercepat ── */}
-        {layerVisibility.route && routeFeatures.length > 0 && (
+        {routeFeatures.length > 0 && (
           <>
             <GeoJSON
               key={`route-outline-${geoJsonKey}`}
@@ -336,7 +291,7 @@ export default function MapView({
         )}
 
         {/* ── Garis Penghubung Titik Lokasi ── */}
-        {layerVisibility.route && connectorFeatures.length > 0 && (
+        {connectorFeatures.length > 0 && (
           <GeoJSON
             key={`connector-${geoJsonKey}`}
             data={
@@ -351,71 +306,69 @@ export default function MapView({
         )}
 
         {/* ── Semua Titik Posko Bencana ── */}
-        {layerVisibility.posko &&
-          backgroundPoskoFeatures.map((feature, idx) => {
-            const coords = (feature.geometry as GeoJSON.Point).coordinates;
-            return (
-              <Marker
-                key={`bg-posko-${feature.properties?.id ?? idx}`}
-                position={[coords[1], coords[0]]}
-                icon={ICON_POSKO}
-              >
-                <Popup>
-                  <div className="text-xs font-sans min-w-[170px]">
-                    <div className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium text-[10px] mb-1">
-                      {feature.properties?.kategori ?? 'Posko Bencana'}
-                    </div>
-                    <div className="font-bold text-slate-900 text-sm">
-                      {feature.properties?.nama}
-                    </div>
+        {backgroundPoskoFeatures.map((feature, idx) => {
+          const coords = (feature.geometry as GeoJSON.Point).coordinates;
+          return (
+            <Marker
+              key={`bg-posko-${feature.properties?.id ?? idx}`}
+              position={[coords[1], coords[0]]}
+              icon={ICON_POSKO}
+            >
+              <Popup>
+                <div className="text-xs font-sans min-w-[170px]">
+                  <div className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium text-[10px] mb-1">
+                    {feature.properties?.kategori ?? 'Posko Bencana'}
                   </div>
-                </Popup>
-              </Marker>
-            );
-          })}
+                  <div className="font-bold text-slate-900 text-sm">
+                    {feature.properties?.nama}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
 
         {/* ── Posko di Dalam Area Pencarian ── */}
-        {layerVisibility.posko &&
-          candidateFeatures.map((feature, i) => {
-            const coords = (feature.geometry as GeoJSON.Point).coordinates;
-            const isBest = feature.properties?.terpilih === true;
-            return (
-              <Marker
-                key={`cand-posko-${i}-${geoJsonKey}`}
-                position={[coords[1], coords[0]]}
-                icon={isBest ? ICON_BEST : ICON_CAND}
-                zIndexOffset={isBest ? 1200 : 500}
-              >
-                <Popup>
-                  <div className="text-xs font-sans min-w-[190px]">
-                    <div
-                      className={`inline-block px-2 py-0.5 rounded font-semibold text-[10px] mb-1 ${
-                        isBest
-                          ? 'bg-blue-700 text-white'
-                          : 'bg-sky-100 text-sky-800'
-                      }`}
-                    >
-                      {isBest ? 'POSKO TERDEKAT' : 'POSKO DI SEKITAR ANDA'}
+        {candidateFeatures.map((feature, i) => {
+          const coords = (feature.geometry as GeoJSON.Point).coordinates;
+          const isBest = feature.properties?.terpilih === true;
+          return (
+            <Marker
+              key={`cand-posko-${i}-${geoJsonKey}`}
+              position={[coords[1], coords[0]]}
+              icon={isBest ? ICON_BEST : ICON_CAND}
+              zIndexOffset={isBest ? 1200 : 500}
+            >
+              <Popup>
+                <div className="text-xs font-sans min-w-[190px]">
+                  <div
+                    className={`inline-block px-2 py-0.5 rounded font-semibold text-[10px] mb-1 ${
+                      isBest
+                        ? 'bg-blue-700 text-white'
+                        : 'bg-sky-100 text-sky-800'
+                    }`}
+                  >
+                    {isBest ? 'POSKO TERDEKAT' : 'POSKO DI SEKITAR ANDA'}
+                  </div>
+                  <div className="font-bold text-slate-900 text-sm">
+                    {feature.properties?.nama}
+                  </div>
+                  <div className="text-slate-500 text-[11px] mb-1.5">
+                    {feature.properties?.kategori}
+                  </div>
+                  <div className="border-t border-slate-100 pt-1.5 space-y-0.5 text-slate-700">
+                    <div>
+                      Jarak Rute: <b>{feature.properties?.distance_km} km</b>
                     </div>
-                    <div className="font-bold text-slate-900 text-sm">
-                      {feature.properties?.nama}
-                    </div>
-                    <div className="text-slate-500 text-[11px] mb-1.5">
-                      {feature.properties?.kategori}
-                    </div>
-                    <div className="border-t border-slate-100 pt-1.5 space-y-0.5 text-slate-700">
-                      <div>
-                        Jarak Rute: <b>{feature.properties?.distance_km} km</b>
-                      </div>
-                      <div>
-                        Estimasi Waktu: <b>{feature.properties?.travel_time_minutes} menit</b>
-                      </div>
+                    <div>
+                      Estimasi Waktu: <b>{feature.properties?.travel_time_minutes} menit</b>
                     </div>
                   </div>
-                </Popup>
-              </Marker>
-            );
-          })}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
 
         {/* ── Marker Titik Lokasi Pengguna ── */}
         {userLatLng && (

@@ -20,11 +20,6 @@ body {
   font-family: inherit;
 }
 
-/* Mode kanvas vektor murni (tanpa gambar bangunan/tile raster) */
-.vector-canvas-mode .leaflet-container {
-  background-color: #eef2f6 !important;
-}
-
 /* Override Leaflet popup agar bersih dan modern */
 .leaflet-popup-content-wrapper {
   border-radius: 10px !important;
