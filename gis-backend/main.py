@@ -1,4 +1,4 @@
-"""
+﻿"""
 Sistem Pencarian Rute Tercepat Menuju Posko Bencana Alam di Kota Palu
 Backend FastAPI — Kelompok 3 AFL2 Compgraph
 
@@ -56,6 +56,10 @@ OSM_POSKO_TAGS: dict[str, Any] = {
     "emergency": "assembly_point",
 }
 
+# ──────────────────────────────────────────────────────────
+# [ARSIP / CADANGAN] Dataset Posko Hardcode
+# Disimpan sebagai komentar sesuai instruksi (just in case API OSM gagal/offline)
+# ──────────────────────────────────────────────────────────
 # ──────────────────────────────────────────────────────────
 # [ARSIP / CADANGAN] Dataset Posko Hardcode
 # Disimpan sebagai komentar sesuai instruksi (just in case API OSM gagal/offline)
@@ -140,14 +144,6 @@ def _extract_posko_from_osm() -> gpd.GeoDataFrame:
             }
         )
 
-    priority_order = {
-        "Posko Pengungsian & Titik Kumpul": 0,
-        "Area Evakuasi Terbuka": 1,
-        "Fasilitas Medis & Logistik Darurat": 2,
-        "Posko Komando & Tanggap Darurat": 3,
-    }
-    records.sort(key=lambda r: (priority_order.get(r["kategori"], 9), r["nama"]))
-
     for i, rec in enumerate(records, start=1):
         rec["id"] = f"P{i:02d}"
         if rec["nama"] == "Titik Kumpul Evakuasi Darurat":
@@ -155,7 +151,6 @@ def _extract_posko_from_osm() -> gpd.GeoDataFrame:
 
     posko_gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=CRS_GEO)
     return posko_gdf
-
 
 def _get_edge_linestring(G: nx.MultiDiGraph, u: int, v: int, data: dict[str, Any]) -> LineString:
     """Ambil geometry LineString dari edge (u, v) atau bangun garis lurus antar node jika tidak ada."""
@@ -340,6 +335,167 @@ def _append_coords_clean(target: list[list[float]], new_coords: list[tuple[float
             target.append(pt)
 
 
+def _fmt_dist(dist_m: int) -> str:
+    """Format jarak meter menjadi string ramah pengguna."""
+    if dist_m < 50:
+        return ""
+    elif dist_m < 1000:
+        return f"{dist_m} m"
+    else:
+        return f"{dist_m / 1000:.1f} km"
+
+
+def _generate_directions(
+    G: nx.MultiDiGraph,
+    route_coords: list[list[float]],
+    node_path: list[int],
+    total_dist_m: float,
+    total_time_s: float,
+) -> list[dict[str, Any]]:
+    """
+    Generate petunjuk arah turn-by-turn dari node_path A* beserta nama jalan.
+    """
+    if not node_path or len(node_path) < 2:
+        dist_m = round(total_dist_m)
+        return [{"step": 1, "instruction": "Menuju posko tujuan", "distance_m": dist_m, "distance_text": _fmt_dist(dist_m), "maneuver": "straight"}]
+
+    steps: list[dict[str, Any]] = []
+
+    def _get_edge_name(nu: int, nv: int) -> str:
+        if not G.has_edge(nu, nv):
+            return "jalan tanpa nama"
+        edge_data = min(G[nu][nv].values(), key=lambda d: d.get("travel_time", float("inf")))
+        name = edge_data.get("name")
+        if isinstance(name, list):
+            name = name[0] if name else None
+        if name and str(name).strip() and str(name).lower() not in ("none", "nan"):
+            return str(name).strip()
+        highway = edge_data.get("highway", "")
+        if isinstance(highway, list):
+            highway = highway[0] if highway else ""
+        highway_map = {
+            "primary": "jalan utama", "secondary": "jalan sekunder",
+            "tertiary": "jalan tersier", "residential": "jalan perumahan",
+            "service": "jalan servis", "path": "jalur pejalan kaki",
+            "footway": "trotoar", "cycleway": "jalur sepeda",
+            "unclassified": "jalan tanpa nama", "trunk": "jalan besar",
+        }
+        return highway_map.get(str(highway), "jalan tanpa nama")
+
+    def _calc_bearing(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+        import math
+        dlon = math.radians(lon2 - lon1)
+        lat1r = math.radians(lat1)
+        lat2r = math.radians(lat2)
+        x = math.sin(dlon) * math.cos(lat2r)
+        y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+        bearing = math.degrees(math.atan2(x, y))
+        return (bearing + 360) % 360
+
+    def _bearing_to_cardinal(bearing: float) -> str:
+        dirs = ["Utara", "Timur Laut", "Timur", "Tenggara", "Selatan", "Barat Daya", "Barat", "Barat Laut"]
+        idx = round(bearing / 45) % 8
+        return dirs[idx]
+
+    def _turn_maneuver(prev_bearing: float, curr_bearing: float) -> tuple[str, str]:
+        diff = (curr_bearing - prev_bearing + 360) % 360
+        if diff < 20 or diff > 340:
+            return "straight", "Lurus terus"
+        elif 20 <= diff < 70:
+            return "slight-right", "Belok sedikit ke kanan"
+        elif 70 <= diff < 130:
+            return "right", "Belok kanan"
+        elif 130 <= diff < 180:
+            return "sharp-right", "Belok tajam ke kanan"
+        elif 180 <= diff < 210:
+            return "u-turn", "Putar balik"
+        elif 210 <= diff < 250:
+            return "sharp-left", "Belok tajam ke kiri"
+        elif 250 <= diff < 310:
+            return "left", "Belok kiri"
+        else:
+            return "slight-left", "Belok sedikit ke kiri"
+
+    # Step 1: Mulai perjalanan
+    start_lon = float(G.nodes[node_path[0]]["x"])
+    start_lat = float(G.nodes[node_path[0]]["y"])
+    if len(node_path) >= 2:
+        next_lon = float(G.nodes[node_path[1]]["x"])
+        next_lat = float(G.nodes[node_path[1]]["y"])
+        init_bearing = _calc_bearing(start_lon, start_lat, next_lon, next_lat)
+        cardinal = _bearing_to_cardinal(init_bearing)
+        first_road = _get_edge_name(node_path[0], node_path[1])
+    else:
+        cardinal = "depan"
+        first_road = "jalan"
+
+    first_dist = 0.0
+    if len(node_path) >= 2:
+        be0 = min(G[node_path[0]][node_path[1]].values(), key=lambda d: d.get("travel_time", float("inf")))
+        first_dist = float(be0.get("length", 0.0))
+
+    steps.append({
+        "step": 1,
+        "instruction": f"Mulai menuju arah {cardinal} di {first_road}",
+        "distance_m": round(first_dist),
+        "distance_text": _fmt_dist(round(first_dist)),
+        "maneuver": "depart",
+        "road_name": first_road,
+    })
+
+    # Steps tengah: deteksi belokan saat nama jalan berubah atau ada persimpangan
+    prev_bearing: float | None = None
+    current_road = first_road
+    accumulated_dist = 0.0
+
+    for i in range(len(node_path) - 1):
+        nu, nv = node_path[i], node_path[i + 1]
+        edge_data = min(G[nu][nv].values(), key=lambda d: d.get("travel_time", float("inf")))
+        seg_dist = float(edge_data.get("length", 0.0))
+        road_name = _get_edge_name(nu, nv)
+
+        lon_u = float(G.nodes[nu]["x"]); lat_u = float(G.nodes[nu]["y"])
+        lon_v = float(G.nodes[nv]["x"]); lat_v = float(G.nodes[nv]["y"])
+        curr_bearing = _calc_bearing(lon_u, lat_u, lon_v, lat_v)
+
+        if prev_bearing is not None and (road_name != current_road or i == len(node_path) - 2):
+            maneuver, turn_text = _turn_maneuver(prev_bearing, curr_bearing)
+            if maneuver != "straight" or road_name != current_road:
+                step_num = len(steps) + 1
+                if road_name != current_road and road_name != "jalan tanpa nama":
+                    instruction = f"{turn_text} ke {road_name}"
+                else:
+                    instruction = turn_text
+                accumulated_dist = round(accumulated_dist + seg_dist)
+                steps.append({
+                    "step": step_num,
+                    "instruction": instruction,
+                    "distance_m": accumulated_dist,
+                    "distance_text": _fmt_dist(accumulated_dist),
+                    "maneuver": maneuver,
+                    "road_name": road_name,
+                })
+                accumulated_dist = 0.0
+                current_road = road_name
+            else:
+                accumulated_dist += seg_dist
+        else:
+            accumulated_dist += seg_dist
+
+        prev_bearing = curr_bearing
+
+    # Step terakhir: tiba di tujuan
+    steps.append({
+        "step": len(steps) + 1,
+        "instruction": "Tiba di posko tujuan",
+        "distance_m": 0,
+        "distance_text": "",
+        "maneuver": "arrive",
+        "road_name": "",
+    })
+
+    return steps
+
 def _compute_precise_route(
     G: nx.MultiDiGraph,
     orig_lon: float,
@@ -348,7 +504,7 @@ def _compute_precise_route(
     dest_lon: float,
     dest_lat: float,
     dest_edge: tuple[int, int, int],
-) -> tuple[list[list[float]], list[list[float]], list[list[float]], float, float, int]:
+) -> tuple[list[list[float]], list[list[float]], list[list[float]], float, float, int, list[int]]:
     """
     Hitung rute jalan tercepat A* dengan proyeksi presisi pada segmen jalan/gang (edge):
     - Memotong segmen jalan awal tepat dari titik proyeksi pengguna (bukan melompat ke persimpangan jauh)
@@ -397,6 +553,7 @@ def _compute_precise_route(
         else:
             _append_coords_clean(road_coords, list(seg_geom.coords))
         segment_count = 1
+        node_path = []  # titik awal dan akhir di edge yang sama
     else:
         # Evaluasi kombinasi keluar dari edge awal (menuju u_o atau v_o)
         # dan masuk ke edge tujuan (dari u_d atau v_d) untuk mendapatkan waktu tempuh minimum
@@ -505,6 +662,7 @@ def _compute_precise_route(
         total_time_s,
         total_dist_m,
         segment_count,
+        node_path,
     )
 
 
@@ -592,6 +750,7 @@ def find_route(req: LocationRequest):
     best_road_dist_m: float = 0.0
     best_seg_count: int = 0
     best_posko_idx: int = -1
+    best_directions: list[dict] = []
     candidates_list: list[dict[str, Any]] = []
 
     for idx, row in candidate_gdf.iterrows():
@@ -611,6 +770,7 @@ def find_route(req: LocationRequest):
                 travel_time,
                 road_distance_m,
                 seg_count,
+                node_path_result,
             ) = _compute_precise_route(
                 G,
                 req.lon,
@@ -620,6 +780,7 @@ def find_route(req: LocationRequest):
                 p_lat,
                 dest_edge,
             )
+            directions = _generate_directions(G, route_coords, node_path_result, road_distance_m, travel_time)
 
             candidates_list.append(
                 {
@@ -638,6 +799,7 @@ def find_route(req: LocationRequest):
                     "start_connector": start_conn,
                     "end_connector": end_conn,
                     "road_segments_count": seg_count,
+                    "directions": directions,
                 }
             )
 
@@ -649,6 +811,7 @@ def find_route(req: LocationRequest):
                 best_start_conn = start_conn
                 best_end_conn = end_conn
                 best_posko_idx = idx  # type: ignore[assignment]
+                best_directions = directions
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             continue
 
@@ -783,6 +946,7 @@ def find_route(req: LocationRequest):
         "user_utm_x": round(float(user_point_utm.x), 2),
         "user_utm_y": round(float(user_point_utm.y), 2),
         "crs_projected": CRS_UTM,
+        "directions": best_directions,
     }
 
     return {
@@ -845,3 +1009,44 @@ def get_layers_summary():
 @app.get("/health")
 def health():
     return {"status": "ok", "data_loaded": bool(state)}
+
+
+@app.get("/geocode")
+async def geocode_search(q: str):
+    """Cari koordinat lokasi menggunakan Nominatim OpenStreetMap geocoding di area Kota Palu."""
+    import httpx
+    if not q.strip():
+        return {"results": []}
+    
+    # Tambahkan "Palu" ke query agar hasil lebih relevan ke Kota Palu
+    query = q.strip()
+    if "palu" not in query.lower():
+        query = f"{query}, Palu, Sulawesi Tengah, Indonesia"
+    
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 5,
+        "countrycodes": "id",
+        "viewbox": "119.72,-1.08,120.04,-0.66",  # bbox Kota Palu
+        "bounded": 1,
+    }
+    headers = {"User-Agent": "GISPoskoBenanaPalu/2.0"}
+    
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get("https://nominatim.openstreetmap.org/search", params=params, headers=headers)
+            data = resp.json()
+        results = [
+            {
+                "display_name": item.get("display_name", ""),
+                "short_name": item.get("name") or item.get("display_name", "").split(",")[0],
+                "lat": float(item["lat"]),
+                "lon": float(item["lon"]),
+                "type": item.get("type", ""),
+            }
+            for item in data
+        ]
+        return {"results": results}
+    except Exception:
+        return {"results": []}

@@ -32,10 +32,20 @@ interface CandidatePosko {
   travel_time_seconds: number;
   travel_time_minutes: number;
   terpilih: boolean;
+  directions?: DirectionStep[];
+}
+
+interface DirectionStep {
+  step: number;
+  instruction: string;
+  distance_m: number;
+  distance_text: string;
+  maneuver: string;
+  road_name?: string;
 }
 
 interface RouteResponse {
-  posko_info: PoskoInfo;
+  posko_info: PoskoInfo & { directions?: DirectionStep[] };
   candidates: CandidatePosko[];
   geojson: GeoJSON.FeatureCollection;
 }
@@ -73,6 +83,17 @@ export default function HomePage() {
     [number, number] | null
   >(null);
   const [activePoskoId, setActivePoskoId] = useState<string | null>(null);
+
+  // State untuk Search Lokasi
+  const [locationSearch, setLocationSearch] = useState('');
+  const [searchSuggestions, setSearchSuggestions] = useState<Array<{
+    display_name: string;
+    short_name: string;
+    lat: number;
+    lon: number;
+  }>>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const BACKEND_URL =
     process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
@@ -150,6 +171,69 @@ export default function HomePage() {
     setSelectedPoskoCoords(null);
     setActivePoskoId(null);
   };
+
+  // Search lokasi via Nominatim (proxy ke backend)
+  const searchLocation = useCallback(
+    async (query: string) => {
+      if (!query.trim() || query.length < 3) {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const res = await fetch(`${BACKEND_URL}/geocode?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        setSearchSuggestions(data.results ?? []);
+        setShowSuggestions(true);
+      } catch {
+        setSearchSuggestions([]);
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [BACKEND_URL]
+  );
+
+  // Debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchLocation(locationSearch);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [locationSearch, searchLocation]);
+
+  const handleSelectLocation = useCallback(
+    (lat: number, lon: number, name: string) => {
+      setLocationSearch(name);
+      setShowSuggestions(false);
+      setSearchSuggestions([]);
+      handleMapClick(lat, lon);
+    },
+    [handleMapClick]
+  );
+
+  // Hitung data rute yang sedang aktif dipilih (default: rekomendasi utama / terpilih)
+  const activeRouteData = useMemo(() => {
+    if (!routeData) return null;
+    const activeCand = routeData.candidates.find((c) => c.id === activePoskoId);
+    if (activeCand) {
+      return {
+        nama: activeCand.nama,
+        kategori: activeCand.kategori,
+        distance_km: activeCand.distance_km,
+        travel_time_minutes: activeCand.travel_time_minutes,
+        directions: activeCand.directions ?? routeData.posko_info.directions ?? [],
+      };
+    }
+    return {
+      nama: routeData.posko_info.nama,
+      kategori: routeData.posko_info.kategori,
+      distance_km: routeData.posko_info.distance_km,
+      travel_time_minutes: routeData.posko_info.travel_time_minutes,
+      directions: routeData.posko_info.directions ?? [],
+    };
+  }, [routeData, activePoskoId]);
 
   // Filter daftar posko
   const filteredPoskoList = useMemo(() => {
@@ -268,6 +352,49 @@ export default function HomePage() {
           {/* ── TAB 1: PANDUAN & HASIL RUTE EVAKUASI ── */}
           {activeTab === 'analysis' ? (
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Search Lokasi Awal */}
+              <div className="relative">
+                <div className="flex items-center gap-2 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
+                  <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={locationSearch}
+                    onChange={(e) => { setLocationSearch(e.target.value); if (!e.target.value) { setShowSuggestions(false); setSearchSuggestions([]); } }}
+                    onFocus={() => { if (searchSuggestions.length > 0) setShowSuggestions(true); }}
+                    placeholder="Cari lokasi Anda di Kota Palu..."
+                    className="flex-1 text-xs bg-transparent outline-none text-slate-800 placeholder-slate-400"
+                  />
+                  {isSearching && <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />}
+                  {locationSearch && !isSearching && (
+                    <button type="button" onClick={() => { setLocationSearch(''); setShowSuggestions(false); setSearchSuggestions([]); }} className="text-slate-400 hover:text-slate-600 shrink-0">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 px-1">atau klik langsung di peta untuk memilih lokasi</p>
+
+                {/* Dropdown Suggestions */}
+                {showSuggestions && searchSuggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                    {searchSuggestions.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectLocation(suggestion.lat, suggestion.lon, suggestion.short_name)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                      >
+                        <p className="text-xs font-semibold text-slate-900 truncate">{suggestion.short_name}</p>
+                        <p className="text-[10px] text-slate-500 truncate mt-0.5">{suggestion.display_name}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Panduan Penggunaan */}
               <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-100">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2">
@@ -510,6 +637,56 @@ export default function HomePage() {
                       })}
                     </div>
                   </div>
+
+                  {/* Panel Petunjuk Arah (Dinamis Sesuai Rute/Posko yang Dipilih) */}
+                  {activeRouteData && activeRouteData.directions && activeRouteData.directions.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-white border border-slate-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                            </svg>
+                            Petunjuk Arah
+                          </h4>
+                          <p className="text-[11px] text-blue-700 font-semibold truncate mt-0.5">
+                            Menuju: {activeRouteData.nama}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <span className="text-[11px] font-bold text-slate-800 block">
+                            {activeRouteData.distance_km} km
+                          </span>
+                          <span className="text-[10px] text-slate-500 block">
+                            {activeRouteData.travel_time_minutes} menit
+                          </span>
+                        </div>
+                      </div>
+                      <div className="space-y-0 max-h-72 overflow-y-auto pr-1 mt-2 pt-2 border-t border-slate-100">
+                        {activeRouteData.directions.map((step) => {
+                          const icons: Record<string, string> = {
+                            depart: '↑', arrive: '🏁', straight: '↑', left: '↰', right: '↱',
+                            'slight-left': '↖', 'slight-right': '↗', 'sharp-left': '↙', 'sharp-right': '↘', 'u-turn': '↩',
+                          };
+                          const icon = icons[step.maneuver] ?? '↑';
+                          const isSpecial = step.maneuver === 'depart' || step.maneuver === 'arrive';
+                          return (
+                            <div key={step.step} className={`flex items-start gap-2.5 py-2 ${step.step < activeRouteData.directions.length ? 'border-b border-slate-100' : ''}`}>
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] shrink-0 mt-0.5 font-bold ${isSpecial ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                {icon}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-slate-800 leading-snug">{step.instruction}</p>
+                              </div>
+                              {step.distance_text && (
+                                <span className="text-[11px] font-semibold text-slate-500 shrink-0">{step.distance_text}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="button"
